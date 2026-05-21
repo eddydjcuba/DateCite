@@ -1,0 +1,146 @@
+              >
+                <LinearGradient colors={["#ff5aa0", "#ff2f86", "#ec006b"]} start={{ x: 0, y: 0.5 }} end={{ x: 1, y: 0.5 }} style={styles.primaryMiniButtonFill}>
+                  <Text style={styles.primaryMiniButtonText}>{busyKey === "direct-message" ? "Enviando..." : "Enviar"}</Text>
+                </LinearGradient>
+              </Pressable>
+            </View>
+          </View>
+        </KeyboardAvoidingView>
+      </View>
+    );
+  }
+
+  function renderChatTab() {
+    return (
+      <ScrollView contentContainerStyle={styles.appScroll}>
+        <View style={styles.screenHeaderRow}>
+          <View style={styles.screenHeaderCopy}>
+            <Text style={styles.screenEyebrow}>Mensajes</Text>
+            <Text style={styles.screenTitle}>Habla solo cuando el match sea real.</Text>
+          </View>
+          <View style={styles.screenIconButton}>
+            <Ionicons name="chatbubble-ellipses-outline" size={20} color="#ffd7e6" />
+          </View>
+        </View>
+
+        <View style={styles.searchGlassBar}>
+          <Ionicons name="search-outline" size={18} color="rgba(255,255,255,0.6)" />
+          <TextInput
+            value={chatSearch}
+            onChangeText={setChatSearch}
+            placeholder="Buscar"
+            placeholderTextColor="rgba(255,255,255,0.4)"
+            selectionColor="#ff5ba1"
+            style={styles.searchGlassInput}
+          />
+        </View>
+
+        {filteredMatches.length === 0 ? (
+          <View style={styles.emptyGlassCard}>
+            <Text style={styles.emptyGlassTitle}>Todavia no tienes conversaciones.</Text>
+            <Text style={styles.emptyGlassCopy}>Da algunos likes y cuando haya un match mutuo, el chat aparecera aqui con acceso libre.</Text>
+          </View>
+        ) : (
+          <>
+            <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.storyStrip}>
+              {filteredMatches.map((item) => (
+                <Pressable
+                  key={item.id}
+                  onPress={() => void openMatchThread(item.id)}
+                  style={[styles.storyAvatarCard, selectedMatchId === item.id ? styles.storyAvatarCardActive : null]}
+                >
+                  <View style={styles.storyAvatarRing}>
+                    <Image source={{ uri: item.otherUser.photos[0] }} style={styles.storyAvatarImage} />
+                  </View>
+                  <Text style={styles.storyAvatarName} numberOfLines={1}>{item.otherUser.displayName}</Text>
+                </Pressable>
+              ))}
+            </ScrollView>
+
+            <View style={styles.messageListCard}>
+              {filteredMatches.map((item) => (
+                <Pressable
+                  key={item.id}
+                  onPress={() => void openMatchThread(item.id)}
+                  style={[styles.messageListRow, selectedMatchId === item.id ? styles.messageListRowActive : null]}
+                >
+                  <Image source={{ uri: item.otherUser.photos[0] }} style={styles.messageListAvatar} />
+                  <View style={styles.messageListCopy}>
+                    <Text style={styles.messageListName}>{item.otherUser.displayName}</Text>
+                    <Text style={styles.messageListSnippet} numberOfLines={1}>
+                      {item.lastMessage ?? "Abre la conversacion y rompe el hielo."}
+                    </Text>
+                  </View>
+                  <View style={styles.messageListMeta}>
+                    <Text style={styles.messageListTime}>{formatMoment(item.lastMessageAt ?? item.createdAt)}</Text>
+                    {selectedMatchId === item.id ? <View style={styles.messageListLiveDot} /> : null}
+                  </View>
+                </Pressable>
+              ))}
+            </View>
+          </>
+        )}
+
+        {selectedMatch ? (
+          <View style={styles.threadCard}>
+            <View style={styles.threadHeader}>
+              <View style={styles.threadHeaderProfile}>
+                <Image source={{ uri: selectedMatch.otherUser.photos[0] }} style={styles.threadHeaderAvatar} />
+                <View style={styles.threadHeaderCopy}>
+                  <Text style={styles.threadHeaderName}>
+                    {selectedMatch.otherUser.displayName}, {selectedMatch.otherUser.age}
+                  </Text>
+                  <Text style={styles.threadHeaderMeta}>
+                    {selectedMatch.otherUser.city}  •  {selectedMatch.otherUser.compatibilityScore}% de afinidad
+                  </Text>
+                </View>
+              </View>
+              <View style={styles.threadStatusPill}>
+                <Text style={styles.threadStatusPillText}>match</Text>
+              </View>
+            </View>
+
+            <ScrollView style={styles.threadMessages} nestedScrollEnabled>
+              {activeMessages.map((message) => {
+                const mine = message.sender_user_id === session?.user.id;
+                return (
+                  <View key={message.id} style={[styles.darkMessageBubble, mine ? styles.darkMessageBubbleMine : styles.darkMessageBubbleTheirs]}>
+                    <Text style={[styles.darkMessageText, mine ? styles.darkMessageTextMine : styles.darkMessageTextTheirs]}>{message.content}</Text>
+                    <Text style={[styles.darkMessageMeta, mine ? styles.darkMessageMetaMine : styles.darkMessageMetaTheirs]}>
+                      {formatMoment(message.created_at)}
+                    </Text>
+                  </View>
+                );
+              })}
+            </ScrollView>
+
+            {activeMessages.length === 0 ? (
+              <View style={styles.quickStarterRow}>
+                {[
+                  `Hola ${selectedMatch.otherUser.displayName}, me gusto tu perfil.`,
+                  "Tu energia se siente muy natural.",
+                  "Si te va, empezamos con una charla simple.",
+                ].map((starter) => (
+                  <Pressable key={starter} onPress={() => void sendMessage(starter)} style={styles.quickStarterChip}>
+                    <Text style={styles.quickStarterChipText}>{starter}</Text>
+                  </Pressable>
+                ))}
+              </View>
+            ) : null}
+
+            <View style={styles.threadComposer}>
+              <TextInput
+                value={composer}
+                onChangeText={setComposer}
+                placeholder="Escribe algo real"
+                placeholderTextColor="rgba(255,255,255,0.42)"
+                selectionColor="#ff5ba1"
+                multiline
+                style={styles.threadComposerInput}
+              />
+              <Pressable onPress={() => void sendMessage()} style={({ pressed }) => [styles.threadSendButtonWrap, pressed ? styles.welcomeButtonPressed : null]}>
+                <LinearGradient colors={["#ff5aa0", "#ff2f86", "#ec006b"]} start={{ x: 0, y: 0.5 }} end={{ x: 1, y: 0.5 }} style={styles.threadSendButton}>
+                  <Ionicons name="send" size={18} color="#fff6fb" />
+                </LinearGradient>
+              </Pressable>
+            </View>

@@ -1,0 +1,53 @@
+{
+  "expo": {
+    "name": "Conexia",
+    "slug": "conexia",
+    "scheme": "conexia",
+    "version": "0.1.0",
+    "orientation": "portrait",
+    "userInterfaceStyle": "light",
+    "backgroundColor": "#fdf4f5",
+    "plugins": [
+      [
+        "expo-camera",
+        {
+          "cameraPermission": "Conexia usa tu camara para verificar que tu cuenta es real."
+        }
+      ],
+      [
+        "expo-image-picker",
+        {
+          "photosPermission": "Conexia usa tus fotos para completar tu perfil romantico.",
+          "cameraPermission": "Conexia usa la camara para selfies de verificacion."
+        }
+      ],
+      [
+        "expo-location",
+        {
+          "locationWhenInUsePermission": "Conexia usa tu ubicacion para rellenar tu ciudad o pais automaticamente."
+        }
+      ],
+      [
+        "expo-av",
+        {
+          "microphonePermission": "Conexia usa tu microfono para enviar notas de voz a tus matches."
+        }
+      ],
+      "expo-secure-store",
+      "expo-notifications"
+    ],
+    "assetBundlePatterns": [
+      "**/*"
+    ],
+    "ios": {
+      "infoPlist": {
+        "NSMicrophoneUsageDescription": "Conexia usa tu microfono para enviar notas de voz a tus matches."
+      }
+    },
+    "android": {
+      "permissions": [
+        "RECORD_AUDIO"
+      ]
+    }
+  }
+}
