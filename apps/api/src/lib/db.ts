@@ -74,6 +74,7 @@ function ensureSchema(db: DatabaseSync) {
     CREATE TABLE IF NOT EXISTS users (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
       email TEXT NOT NULL UNIQUE,
+      firebase_uid TEXT UNIQUE,
       password_hash TEXT NOT NULL,
       full_name TEXT NOT NULL,
       birth_date TEXT NOT NULL,
@@ -205,8 +206,22 @@ function ensureSchema(db: DatabaseSync) {
       last_error TEXT NOT NULL DEFAULT '',
       last_sent_at TEXT
     );
+
+    CREATE TABLE IF NOT EXISTS manual_payments (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      plan TEXT NOT NULL DEFAULT 'plus',
+      amount TEXT NOT NULL DEFAULT '',
+      reference TEXT NOT NULL DEFAULT '',
+      note TEXT NOT NULL DEFAULT '',
+      status TEXT NOT NULL DEFAULT 'pending',
+      created_at TEXT NOT NULL,
+      reviewed_at TEXT
+    );
   `);
 
+  ensureColumn(db, "users", "firebase_uid", "TEXT");
+  db.exec("CREATE UNIQUE INDEX IF NOT EXISTS users_firebase_uid_unique ON users(firebase_uid) WHERE firebase_uid IS NOT NULL");
   ensureColumn(db, "profiles", "zodiac_sign", "TEXT NOT NULL DEFAULT ''");
   ensureColumn(db, "profiles", "gender_identity", "TEXT NOT NULL DEFAULT ''");
   ensureColumn(db, "profiles", "seeking_json", "TEXT NOT NULL DEFAULT '[]'");

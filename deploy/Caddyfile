@@ -1,0 +1,31 @@
+{
+	email {CADDY_EMAIL}
+}
+
+{PUBLIC_HOSTNAME} {
+	encode gzip zstd
+
+	handle /api/* {
+		reverse_proxy 127.0.0.1:{API_PORT}
+	}
+
+	handle /media/* {
+		reverse_proxy 127.0.0.1:{API_PORT}
+	}
+
+	handle /health {
+		reverse_proxy 127.0.0.1:{API_PORT}
+	}
+
+	handle /panel* {
+		root * {WEB_ROOT}
+		try_files {path} /index.html
+		file_server
+	}
+
+	handle {
+		root * {WEB_ROOT}
+		try_files {path} /index.html
+		file_server
+	}
+}

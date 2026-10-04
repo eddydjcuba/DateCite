@@ -32,12 +32,15 @@ loadEnvFiles();
 const configuredJwtSecret = process.env.JWT_SECRET?.trim();
 const configuredAdminToken = process.env.ADMIN_TOKEN?.trim();
 const configuredPort = Number(process.env.PORT ?? 4000);
+const configuredFirebaseWebApiKey = process.env.FIREBASE_WEB_API_KEY?.trim();
 
 export const config = {
   host: process.env.HOST ?? "0.0.0.0",
   port: configuredPort,
   jwtSecret: configuredJwtSecret || crypto.randomBytes(32).toString("hex"),
   adminToken: configuredAdminToken ?? "",
+  firebaseWebApiKey: configuredFirebaseWebApiKey ?? "",
+  firebaseAuthEnabled: Boolean(configuredFirebaseWebApiKey),
   dbPath: process.env.SQLITE_PATH ? path.resolve(process.cwd(), process.env.SQLITE_PATH) : rootDataPath,
   uploadsPath: process.env.UPLOADS_PATH
     ? path.resolve(process.cwd(), process.env.UPLOADS_PATH)

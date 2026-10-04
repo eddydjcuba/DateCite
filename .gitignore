@@ -8,3 +8,8 @@ dist/
 apps/api/data/
 apps/web/.vite/
 coverage/
+deploy/.env.production
+deploy/volumes/
+backups/
+data/
+credentials/

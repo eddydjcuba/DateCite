@@ -154,6 +154,7 @@ function createNotification(
 type UserRow = {
   id: number;
   email: string;
+  firebase_uid?: string | null;
   password_hash: string;
   full_name: string;
   age: number;
@@ -270,6 +271,22 @@ export function getUserByEmail(db: DatabaseSync, email: string) {
   `).get(email) as UserRow | undefined;
 }
 
+export function getUserByFirebaseUid(db: DatabaseSync, firebaseUid: string) {
+  return db.prepare(`
+    SELECT id, email, firebase_uid, password_hash, full_name, age, city, plan, is_admin
+    FROM users
+    WHERE firebase_uid = ?
+  `).get(firebaseUid) as UserRow | undefined;
+}
+
+export function linkFirebaseUidToUser(db: DatabaseSync, userId: number, firebaseUid: string) {
+  db.prepare(`
+    UPDATE users
+    SET firebase_uid = ?
+    WHERE id = ?
+  `).run(firebaseUid, userId);
+}
+
 export function registerUser(
   db: DatabaseSync,
   input: {
@@ -279,6 +296,7 @@ export function registerUser(
     displayName: string;
     birthDate: string;
     city: string;
+    firebaseUid?: string;
   },
 ) {
   const age = ageFromBirthDate(input.birthDate);
@@ -292,6 +310,9 @@ export function registerUser(
     `).run(input.email, input.passwordHash, input.fullName, input.birthDate, age, input.city);
 
     const userId = Number(userResult.lastInsertRowid);
+    if (input.firebaseUid) {
+      linkFirebaseUidToUser(db, userId, input.firebaseUid);
+    }
     db.prepare(`
       INSERT INTO profiles (
         user_id, display_name, bio, city, intention, interests_json, photos_json,
@@ -1265,6 +1286,48 @@ export function createWaitlistLead(
   `).run(input.name.trim(), input.email.trim().toLowerCase(), input.city?.trim() ?? "", input.note?.trim() ?? "", getIsoNow());
 }
 
+export function createManualPaymentRequest(
+  db: DatabaseSync,
+  userId: number,
+  input: {
+    plan?: DatingPlan;
+    amount?: string;
+    reference?: string;
+    note?: string;
+  },
+) {
+  const plan = input.plan === "plus" ? "plus" : "free";
+  if (plan !== "plus") {
+    throw new Error("Solo se aceptan solicitudes manuales para Plus.");
+  }
+
+  db.prepare(`
+    INSERT INTO manual_payments (user_id, plan, amount, reference, note, status, created_at)
+    VALUES (?, ?, ?, ?, ?, 'pending', ?)
+  `).run(
+    userId,
+    plan,
+    input.amount?.trim() ?? "",
+    input.reference?.trim() ?? "",
+    input.note?.trim() ?? "",
+    getIsoNow(),
+  );
+}
+
+export function setUserPlan(db: DatabaseSync, userId: number, plan: DatingPlan) {
+  if (plan !== "free" && plan !== "plus") {
+    throw new Error("Plan invalido.");
+  }
+
+  db.prepare(`
+    UPDATE users
+    SET plan = ?
+    WHERE id = ?
+  `).run(plan, userId);
+
+  return buildSession(db, userId);
+}
+
 export function deleteAccount(db: DatabaseSync, userId: number) {
   db.prepare(`DELETE FROM users WHERE id = ?`).run(userId);
   deleteUserMedia(userId);
@@ -1302,6 +1365,26 @@ export function getAdminMetrics(db: DatabaseSync) {
     created_at: string;
   }>;
 
+  const recentManualPayments = db.prepare(`
+    SELECT mp.id, mp.plan, mp.amount, mp.reference, mp.note, mp.status, mp.created_at,
+           u.id as user_id, u.email, u.full_name
+    FROM manual_payments mp
+    JOIN users u ON u.id = mp.user_id
+    ORDER BY mp.id DESC
+    LIMIT 10
+  `).all() as Array<{
+    id: number;
+    plan: DatingPlan;
+    amount: string;
+    reference: string;
+    note: string;
+    status: string;
+    created_at: string;
+    user_id: number;
+    email: string;
+    full_name: string;
+  }>;
+
   return {
     totals: {
       users: count("users"),
@@ -1315,8 +1398,10 @@ export function getAdminMetrics(db: DatabaseSync) {
       visits: count("profile_visits"),
       notifications: count("notifications"),
       devicePushTokens: count("device_push_tokens"),
+      manualPayments: count("manual_payments"),
     },
     recentReports,
     recentLeads,
+    recentManualPayments,
   };
 }

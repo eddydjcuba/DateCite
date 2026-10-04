@@ -10,6 +10,7 @@ import { config } from "./config.js";
 import { launchConfig } from "./constants/launchConfig.js";
 import { comparePassword, createToken, hashPassword, verifyToken } from "./lib/auth.js";
 import { getDb } from "./lib/db.js";
+import { createFirebaseEmailUser, loginFirebaseEmailUser } from "./lib/firebaseAuth.js";
 import { ensureUploadsRoot, getUserMediaDir, toStoredMediaPath } from "./lib/media.js";
 import { saveDevicePushToken } from "./lib/push.js";
 import {
@@ -18,6 +19,7 @@ import {
   buildSession,
   completeVerification,
   createBlock,
+  createManualPaymentRequest,
   createMessage,
   createReport,
   createWaitlistLead,
@@ -28,14 +30,18 @@ import {
   getMessagesForMatch,
   getNotifications,
   getUserByEmail,
+  getUserByFirebaseUid,
   isAdult,
+  linkFirebaseUidToUser,
   listMatches,
   markNotificationsRead,
   recordInteraction,
   registerUser,
   sendDirectMessageRequest,
+  setUserPlan,
   updateProfile,
 } from "./lib/store.js";
+import type { DatingPlan } from "./types.js";
 import type { InteractionAction } from "./types.js";
 
 const db = getDb();
@@ -189,7 +195,7 @@ function isValidEmail(value: string) {
   return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(value.trim().toLowerCase());
 }
 
-app.post("/api/auth/register", (req, res) => {
+app.post("/api/auth/register", async (req, res) => {
   const { email, password, fullName, displayName, birthDate, age, city } = req.body ?? {};
 
   if (!email || !password || !fullName || !city) {
@@ -230,17 +236,32 @@ app.post("/api/auth/register", (req, res) => {
   }
 
   try {
+    const normalizedEmail = String(email).trim().toLowerCase();
+    let firebaseUid: string | undefined;
+    let firebaseIdToken: string | undefined;
+
+    if (config.firebaseAuthEnabled) {
+      const firebaseUser = await createFirebaseEmailUser({
+        email: normalizedEmail,
+        password: String(password),
+      });
+      firebaseUid = firebaseUser.firebaseUid;
+      firebaseIdToken = firebaseUser.idToken;
+    }
+
     const session = registerUser(db, {
-      email: String(email).trim().toLowerCase(),
+      email: normalizedEmail,
       passwordHash: hashPassword(String(password)),
       fullName: String(fullName).trim(),
       displayName: String(displayName ?? fullName).trim(),
       birthDate: normalizedBirthDate,
       city: String(city).trim(),
+      firebaseUid,
     });
 
     return res.status(201).json({
       token: createToken(session.user),
+      firebaseIdToken,
       ...session,
     });
   } catch (error) {
@@ -250,23 +271,148 @@ app.post("/api/auth/register", (req, res) => {
   }
 });
 
-app.post("/api/auth/login", (req, res) => {
+app.post("/api/auth/login", async (req, res) => {
   const { email, password } = req.body ?? {};
 
   if (!email || !password) {
     return res.status(400).json({ message: "Correo y contrasena son obligatorios." });
   }
 
-  const user = getUserByEmail(db, String(email));
-  if (!user || !comparePassword(String(password), user.password_hash)) {
+  let firebaseIdToken: string | undefined;
+  let user = getUserByEmail(db, String(email));
+
+  if (config.firebaseAuthEnabled) {
+    try {
+      const firebaseUser = await loginFirebaseEmailUser({
+        email: String(email).trim().toLowerCase(),
+        password: String(password),
+      });
+      firebaseIdToken = firebaseUser.idToken;
+      user = getUserByFirebaseUid(db, firebaseUser.firebaseUid) ?? getUserByEmail(db, firebaseUser.email);
+
+      if (user && !user.firebase_uid) {
+        linkFirebaseUidToUser(db, user.id, firebaseUser.firebaseUid);
+      }
+    } catch {
+      return res.status(401).json({ message: "Credenciales Firebase invalidas." });
+    }
+  } else if (!user || !comparePassword(String(password), user.password_hash)) {
     return res.status(401).json({ message: "Credenciales invalidas." });
+  }
+
+  if (!user) {
+    return res.status(409).json({
+      message: "Firebase valido el correo, pero falta crear el perfil local. Usa registro primero.",
+      requiresLocalProfile: true,
+    });
   }
 
   const session = buildSession(db, user.id);
   return res.json({
     token: createToken(session.user),
+    firebaseIdToken,
     ...session,
   });
+});
+
+app.post("/api/auth/firebase/register", async (req, res) => {
+  const { email, password, fullName, displayName, birthDate, age, city } = req.body ?? {};
+
+  if (!email || !password || !fullName || !city) {
+    return res.status(400).json({ message: "Faltan campos obligatorios." });
+  }
+
+  if (!isValidEmail(String(email))) {
+    return res.status(400).json({ message: "Debes usar un correo valido." });
+  }
+
+  const normalizedAge = Number(age);
+  const normalizedBirthDate =
+    birthDate && String(birthDate).trim()
+      ? String(birthDate)
+      : Number.isFinite(normalizedAge) && normalizedAge > 0
+        ? birthDateFromAge(normalizedAge)
+        : null;
+
+  if (!normalizedBirthDate) {
+    return res.status(400).json({ message: "Debes indicar edad o fecha de nacimiento." });
+  }
+
+  const resolvedAge = birthDate ? ageFromBirthDate(normalizedBirthDate) : normalizedAge;
+  if (!Number.isFinite(resolvedAge) || resolvedAge < 18 || !isAdult(normalizedBirthDate)) {
+    return res.status(403).json({ message: "DateCite es solo para mayores de 18 anos." });
+  }
+
+  if (getUserByEmail(db, String(email))) {
+    return res.status(409).json({ message: "Ese correo ya existe." });
+  }
+
+  try {
+    const firebaseUser = await createFirebaseEmailUser({
+      email: String(email).trim().toLowerCase(),
+      password: String(password),
+    });
+    const session = registerUser(db, {
+      email: firebaseUser.email,
+      passwordHash: hashPassword(`firebase:${crypto.randomUUID()}`),
+      fullName: String(fullName).trim(),
+      displayName: String(displayName ?? fullName).trim(),
+      birthDate: normalizedBirthDate,
+      city: String(city).trim(),
+      firebaseUid: firebaseUser.firebaseUid,
+    });
+
+    return res.status(201).json({
+      token: createToken(session.user),
+      firebaseIdToken: firebaseUser.idToken,
+      ...session,
+    });
+  } catch (error) {
+    return res.status(400).json({
+      message: error instanceof Error ? error.message : "No pudimos crear la cuenta en Firebase.",
+    });
+  }
+});
+
+app.post("/api/auth/firebase/login", async (req, res) => {
+  const { email, password } = req.body ?? {};
+
+  if (!email || !password) {
+    return res.status(400).json({ message: "Correo y contrasena son obligatorios." });
+  }
+
+  try {
+    const firebaseUser = await loginFirebaseEmailUser({
+      email: String(email).trim().toLowerCase(),
+      password: String(password),
+    });
+    let user = getUserByFirebaseUid(db, firebaseUser.firebaseUid);
+
+    if (!user) {
+      user = getUserByEmail(db, firebaseUser.email);
+      if (user) {
+        linkFirebaseUidToUser(db, user.id, firebaseUser.firebaseUid);
+      }
+    }
+
+    if (!user) {
+      return res.status(409).json({
+        message: "Firebase valido el correo, pero falta crear el perfil local. Usa /api/auth/firebase/register.",
+        requiresLocalProfile: true,
+      });
+    }
+
+    const session = buildSession(db, user.id);
+    return res.json({
+      token: createToken(session.user),
+      firebaseIdToken: firebaseUser.idToken,
+      ...session,
+    });
+  } catch (error) {
+    return res.status(401).json({
+      message: error instanceof Error ? error.message : "Credenciales Firebase invalidas.",
+    });
+  }
 });
 
 app.get("/api/auth/me", requireAuth, (req: AuthedRequest, res) => {
@@ -492,8 +638,37 @@ app.post("/api/waitlist", (req, res) => {
   return res.status(201).json({ ok: true });
 });
 
+app.post("/api/billing/manual-payments", requireAuth, (req: AuthedRequest, res) => {
+  try {
+    createManualPaymentRequest(db, req.authUserId!, {
+      plan: req.body?.plan,
+      amount: req.body?.amount,
+      reference: req.body?.reference,
+      note: req.body?.note,
+    });
+
+    return res.status(201).json({ ok: true });
+  } catch (error) {
+    return res.status(400).json({
+      message: error instanceof Error ? error.message : "No se pudo registrar el pago manual.",
+    });
+  }
+});
+
 app.get("/api/admin/metrics", requireAdminToken, (_req, res) => {
   return res.json(getAdminMetrics(db));
+});
+
+app.put("/api/admin/users/:id/plan", requireAdminToken, (req, res) => {
+  const plan = String(req.body?.plan ?? "") as DatingPlan;
+
+  try {
+    return res.json(setUserPlan(db, Number(req.params.id), plan));
+  } catch (error) {
+    return res.status(400).json({
+      message: error instanceof Error ? error.message : "No se pudo actualizar el plan.",
+    });
+  }
 });
 
 app.use((_req, res) => {
